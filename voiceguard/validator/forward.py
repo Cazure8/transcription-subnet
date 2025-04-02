@@ -44,6 +44,19 @@ async def forward(self):
     miner_uids = [1]
 
     try:
+        # Filter out miners with non-functioning axons
+        functioning_axons = []
+        functioning_uids = []
+        for uid in miner_uids:
+            axon = self.metagraph.axons[uid] 
+            if axon is not None and axon.is_serving:
+                functioning_axons.append(axon)
+                functioning_uids.append(uid)
+        
+        if not functioning_uids:
+            bt.logging.warning("No functioning axons found among selected miners")
+            return
+
         # equally randomly send requests for tts, cloning, deepfake
         if random.random() < 0: # tts requests 0.333
             random_url = select_random_url()
@@ -61,7 +74,7 @@ async def forward(self):
             print(transcription)
             print("----------------------------------")
             responses = self.dendrite.query(
-                axons=[self.metagraph.axons[uid] for uid in miner_uids],
+                axons=functioning_axons,
                 synapse = VoiceGuardSynapse(synapse_type="stt", stt_link=random_url, stt_segment=validator_segment),
                 deserialize=False,
                 timeout=50
@@ -69,7 +82,7 @@ async def forward(self):
             
             rewards = get_stt_rewards(self, query=transcription, responses=responses, time_limit=50)
             print("------after rewards--------")
-            self.update_scores(rewards, miner_uids, score_type="stt")
+            self.update_scores(rewards, functioning_uids, score_type="stt")
             
         elif random.random() < 1: # clone request 0.667
             print("--------------------------")
@@ -84,14 +97,14 @@ async def forward(self):
             clone_clip_base64 = base64.b64encode(clone_clip).decode("utf-8")
             
             responses = await self.dendrite(
-                axons=[self.metagraph.axons[uid] for uid in miner_uids],
+                axons=functioning_axons,
                 synapse = VoiceGuardSynapse(synapse_type="clone", clone_clip=clone_clip_base64, clone_text=clone_text),
                 deserialize=False,
                 timeout=50
             )
             
             rewards = get_clone_rewards(self, clip_audio_path=clone_clip_path, clone_text=clone_text, responses=responses)
-            self.update_scores(rewards, miner_uids, score_type="clone")
+            self.update_scores(rewards, functioning_uids, score_type="clone")
             
         elif random.random() < 1: # 1
             # get real audio or fake audio from DB
@@ -101,14 +114,14 @@ async def forward(self):
                 random_audio = audio_file.read()
             
             responses = self.dendrite.query(
-                axons=[self.metagraph.axons[uid] for uid in miner_uids],
+                axons=functioning_axons,
                 synapse = VoiceGuardSynapse(synapse_type="detection", detection_audio=random_audio),
                 deserialize=False,
                 timeout=50
             )
             
             rewards = get_detection_rewards(self, audio_type = random_audio_type, responses=responses, time_limit=50)
-            self.update_scores(rewards, miner_uids, score_type="detection")
+            self.update_scores(rewards, functioning_uids, score_type="detection")
     
     except Exception as e:
         print(f"An error occurred: {e}")
